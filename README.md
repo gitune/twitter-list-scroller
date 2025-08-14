@@ -9,7 +9,7 @@ Twitter/Xのリストをホームタイムラインのタブにピン止めし�
 
 公式の機能拡張として広く公開できるほど汎用的な作りにはできない気がしたので、あくまでも自分用として作成・利用しています。なので、実際に利用するにはそれなりに手間がかかります。
 
-Firefoxの場合、設定中のAdd-on debuggingからローカルにあるadd-onを一時的に読み込んで使うことはできますが、Firefoxを再起動するたびに読み込まねばならず面倒です。ローカルにあるファイルから読み込むにせよ、永続的に使えるadd-onとするためには、Firefox公式の[アドオン開発センター](https://addons.mozilla.org/ja/developers/)に登録し署名を打ってもらう必要があります。Firefox Syncに登録済みであれば同じアカウントが使えます。
+Firefoxの場合、設定中のAdd-on debuggingからローカルにあるadd-onを一時的に読み込んで使うことはできます(このリポジトリにあるmanifest.json、content_script.jsを同じディレクトリにダウンロードしておき、そのmanifest.jsonを指定して読み込む)が、Firefoxを再起動するたびに読み込まねばならず面倒です。ローカルにあるファイルから読み込むにせよ、永続的に使えるadd-onとするためには、Firefox公式の[アドオン開発センター](https://addons.mozilla.org/ja/developers/)に登録し署名を打ってもらう必要があります。Firefox Syncに登録済みであれば同じアカウントが使えます。
 
 開発センターへのユーザー登録を行ったあと、manifest.jsonとcontent_script.jsをそれぞれroot directoryへ格納したzip fileを作成して「新しいアドオンを登録」すればあと少し。なおadd-onを登録する際に、公式のadd-onストアで公開したいか、それともclosedに使いたいだけかを選択する場面がありますので、closedに使いたいだけであれば後者を選びましょう。また登録時には他にも動作プラットフォームやcode generatorの類は使っていないか？などの質問がありますので適宜答えます。
 
