@@ -176,7 +176,11 @@
     }
     
     if (topMostValidEntry) {
-      const listName = getCurrentListNameFromDOM(); // DOMに依る
+      if (currentListName !== getCurrentListNameFromDOM()) {
+        debugOut("➡️ タブ切り替え中のため保存処理をスキップ");
+        return;
+      }
+      const listName = currentListName; // debounceに備える
       const tweetId = getTweetId(topMostValidEntry.target);
       let tweetTime = null;
       // Retweetではなく、親tweetでもない場合にのみ時刻を記録
@@ -417,7 +421,7 @@
   const mainObserver = new MutationObserver(() => {
     // debounce処理
     clearTimeout(domMutationTimeout);
-    domMutationTimeout = setTimeout(runCheck, 500);
+    domMutationTimeout = setTimeout(runCheck, 250);
   });
 
   // 少し待ってから監視対象を探す
