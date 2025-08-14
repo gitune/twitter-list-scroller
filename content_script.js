@@ -13,6 +13,7 @@
     navigation: 'main[role="main"] nav[role="navigation"]',
     activeTab: 'a[role="tab"][aria-selected="true"] span',
     userAvatar: "div[data-testid='Tweet-User-Avatar']",
+    anchor: 'a[href*="/status/"]',
     timestamp: 'a[href*="/status/"] > time',
     retweet: 'a[role="link"] > span'
   };
@@ -38,34 +39,65 @@
 
   // --- ストレージ管理 ---
 
-  async function saveLastTweetTime(listName, tweetTime) {
-    debugOut(`🔴 保存処理開始: listName=${listName}, tweetTime=${tweetTime}`);
-    if (!listName || !tweetTime) {
-      debugOut("❗ listNameまたはtweetTimeが不正なため保存をスキップ");
+  async function saveLastTweetIdAndTime(listName, tweetId, tweetTime) {
+    debugOut(`🔴 保存処理開始: listName=${listName}, tweetId=${tweetId}, tweetTime=${tweetTime}`);
+    // tweetTimeはnull許容(初回を除く)
+    if (!listName || !tweetId) {
+      debugOut("❗ listNameまたはtweetIdが不正なため保存をスキップ");
       return;
     }
     const key = `list-name-${listName}-time`;
     const result = await browser.storage.local.get(key);
-    const savedTweetTime = result[key];
-    if (savedTweetTime !== tweetTime) {
-      await browser.storage.local.set({ [key]: tweetTime });
-      debugOut(`✅ 保存完了: リスト名「${listName}」の既読時刻を「${tweetTime}」として保存しました`);
+    const savedTweetIdAndTime = result[key];
+    if (!savedTweetIdAndTime) {
+      if (!tweetTime) {
+        debugOut("❗ 初回はtweetTimeが必須なため保存をスキップ");
+        return;
+      }
+      await browser.storage.local.set({ [key]: `${tweetTime},${tweetId}` });
+      debugOut(`✅ 初回保存完了: リスト名「${listName}」の既読時刻「${tweetTime}」、ID「${tweetId}」を保存しました`);
     } else {
-      debugOut("✅ 前回と同じリスト、時刻のため保存をスキップ");
+      const splitted = savedTweetIdAndTime.split(',');
+      const savedTweetTime = splitted.shift();
+      const savedTweetId = splitted.shift();
+      // 1. 保存が不要なケースを最初に弾く (ガード節)
+      //  - 新しい時刻があり、かつ時刻もIDも前回と全く同じ場合は何もしない
+      if (tweetTime && savedTweetTime === tweetTime && savedTweetId === tweetId) {
+        debugOut("✅ 前回と同じリスト、時刻のため保存をスキップ");
+        return;
+      }
+      // 2. 保存する値を決定する
+      //  - 新しい時刻(tweetTime)があればそれを使い、なければ古い時刻(savedTweetTime)を維持する
+      const timeToSave = tweetTime || savedTweetTime;
+      // 3. 保存を実行する
+      await browser.storage.local.set({ [key]: `${timeToSave},${tweetId}` });
+      // 4. 保存内容に応じたログを出力する
+      if (tweetTime) {
+        debugOut(`✅ 保存完了: リスト名「${listName}」の既読時刻「${tweetTime}」、ID「${tweetId}」を保存しました`);
+      } else {
+        debugOut(`✅ 保存完了: リスト名「${listName}」の既読時刻は既存の「${savedTweetTime}」のまま、IDは「${tweetId}」を保存しました`);
+      }
     }
   }
 
-  async function getSavedTweetTime(listName) {
+  async function getSavedTweetIdAndTime(listName) {
     debugOut(`🔵 取得処理開始: listName=${listName}`);
     const key = `list-name-${listName}-time`;
     const result = await browser.storage.local.get(key);
-    const savedTweetTime = result[key];
-    if (savedTweetTime) {
-      debugOut(`✅ 取得成功: リスト名「${listName}」の保存済み時刻は「${savedTweetTime}」です`);
+    const savedTweetIdAndTime = result[key];
+    if (savedTweetIdAndTime) {
+      const splitted = savedTweetIdAndTime.split(',');
+      const savedTweetTime = splitted.shift();
+      const savedTweetId = splitted.shift();
+      debugOut(`✅ 取得成功: リスト名「${listName}」の保存済み時刻は「${savedTweetTime}」、IDは「${savedTweetId}」です`);
+      return {
+        time: savedTweetTime,
+        id: savedTweetId
+      };
     } else {
       debugOut(`ℹ️ 取得失敗: リスト名「${listName}」の保存済み時刻は見つかりませんでした`);
+      return null;
     }
-    return savedTweetTime;
   }
 
   // --- ユーティリティ関数 ---
@@ -109,6 +141,17 @@
     return null;
   }
 
+  function getTweetId(article) {
+    const anchorElement = article.querySelector(SELECTORS.anchor);
+    if (anchorElement) {
+      const m = anchorElement.href && anchorElement.href.match(/\/status\/(\d+)/);
+      const id = m ? m[1] : null;
+      debugOut("tweet id = " + id);
+      return id;
+    }
+    return null;
+  }
+
   /**
    * IntersectionObserverのコールバック。画面に見えているツイートを検知して保存
    */
@@ -125,21 +168,26 @@
 
     let topMostValidEntry = null;
     for (const entry of sortedEntries) {
-      // プロモーションでもリツイートでも親ツイートでもないものだけが対象
-      if (!isPromotedTweet(entry.target) && !isRetweet(entry.target) && !isParentTweet(entry.target)) {
+      // プロモーション以外が保存対象
+      if (!isPromotedTweet(entry.target)) {
         topMostValidEntry = entry;
         break; // 最初の有効なツイートを見つけたらループを抜ける
       }
     }
     
     if (topMostValidEntry) {
-      const tweetTime = getTweetTimestamp(topMostValidEntry.target);
       const listName = getCurrentListNameFromDOM(); // DOMに依る
-      if (tweetTime && listName) {
-        debugOut(`👀 画面上部に表示されている最も新しい有効なツイートの時刻: ${tweetTime}`);
+      const tweetId = getTweetId(topMostValidEntry.target);
+      let tweetTime = null;
+      // Retweetではなく、親tweetでもない場合にのみ時刻を記録
+      if (!isRetweet(topMostValidEntry.target) && !isParentTweet(topMostValidEntry.target)) {
+        tweetTime = getTweetTimestamp(topMostValidEntry.target);
+      }
+      if (listName && tweetId) {
+        debugOut(`👀 画面上部に表示されている最も新しい有効なツイートのIDと時刻: ${tweetId},${tweetTime}`);
         clearTimeout(saveTweetTimeout);
         saveTweetTimeout = setTimeout(() => {
-          saveLastTweetTime(listName, tweetTime);
+          saveLastTweetIdAndTime(listName, tweetId, tweetTime);
         }, 500); // 頻繁な保存を防ぐためのdebounce
       }
     }
@@ -181,8 +229,8 @@
       await waitForTimelineToLoad(targetNode);
 
       // 1. 保存位置までスクロール
-      const savedTime = await getSavedTweetTime(listName);
-      await scrollToTime(savedTime);
+      const savedTweet = await getSavedTweetIdAndTime(listName);
+      await scrollToTime(savedTweet);
 
       // 2. IntersectionObserverをセットアップ(observeはまだしない)
       const options = { root: null, rootMargin: '0px', threshold: 0.2 };
@@ -208,23 +256,23 @@
   /**
    * 目的のツイートまでスクロール
    */
-  async function scrollToTime(targetTime) {
-    debugOut(`⬇️ スクロール処理開始: 目的の時刻=${targetTime}`);
-    
-    if (!targetTime) {
+  async function scrollToTime(targetTweet) {
+    if (!targetTweet) {
       debugOut('ℹ️ 保存された時刻が見つからないため、スクロールをスキップします');
       return;
     }
 
+    debugOut(`⬇️ スクロール処理開始: 目的のID=${targetTweet.id}、時刻=${targetTweet.time}`);
+    
     isScrollingToSaved = true;
-    debugOut(`🔍 目的の時刻「${targetTime}」を検索中...`);
+    debugOut(`🔍 目的のID「${targetTweet.id}」、および時刻「${targetTweet.time}」を検索中...`);
 
     let found = false;
     let retries = 0;
     const maxRetries = 100;
     const retryInterval = 500;
     
-    const targetDate = new Date(targetTime);
+    const targetDate = new Date(targetTweet.time);
     const targetNode = document.querySelector(SELECTORS.main) || document.body;
 
     while (!found && retries < maxRetries) {
@@ -233,23 +281,30 @@
       
       for (let i = 0; i < articles.length; i++) {
         const article = articles[i];
-        if (!isPromotedTweet(article) && !isRetweet(article) && !isParentTweet(article)) {
-          const articleTime = getTweetTimestamp(article);
-          if (articleTime) {
-            const articleDate = new Date(articleTime);
-            if (articleDate.getTime() === targetDate.getTime()) {
-              foundArticle = article;
-              break;
-            } else if (articleDate.getTime() < targetDate.getTime()) {
-              foundArticle = articles[i > 0 ? i - 1 : 0];
-              break;
+        if (!isPromotedTweet(article)) {
+          const articleId = getTweetId(article);
+          if (articleId === targetTweet.id) {
+            foundArticle = article;
+            break;
+          }
+          if (!isRetweet(article) && !isParentTweet(article)) {
+            const articleTime = getTweetTimestamp(article);
+            if (articleTime) {
+              const articleDate = new Date(articleTime);
+              if (articleDate.getTime() === targetDate.getTime()) {
+                foundArticle = article;
+                break;
+              } else if (articleDate.getTime() < targetDate.getTime()) {
+                foundArticle = articles[i > 0 ? i - 1 : 0];
+                break;
+              }
             }
           }
         }
       }
       
       if (foundArticle) {
-        debugOut('✅ 目的の時刻に到達しました。画面内までスクロールします');
+        debugOut('✅ 目的の地点に到達しました。画面内までスクロールします');
         const targetPosition = foundArticle.getBoundingClientRect().top + window.scrollY - 100;
         window.scrollTo({ top: targetPosition, behavior: 'smooth' });
         foundArticle.style.border = "2px solid #1DA1F2";
@@ -362,7 +417,7 @@
   const mainObserver = new MutationObserver(() => {
     // debounce処理
     clearTimeout(domMutationTimeout);
-    domMutationTimeout = setTimeout(runCheck, 300); // 少し短くしても良いかも
+    domMutationTimeout = setTimeout(runCheck, 500);
   });
 
   // 少し待ってから監視対象を探す
