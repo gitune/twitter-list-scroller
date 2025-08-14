@@ -241,7 +241,10 @@
       intersectionObserver = new IntersectionObserver(intersectionCallback, options);
       debugOut("✅ IntersectionObserverをセットアップしました");
 
-      // 3. タイムラインのDOM変更監視をセットアップ(intersection observeも開始)
+      // 3. currentListName更新
+      currentListName = listName;
+
+      // 4. タイムラインのDOM変更監視をセットアップ(intersection observeも開始)
       timelineNode = targetNode.querySelector(SELECTORS.timeline);
       if (timelineNode) {
         timelineObserver = new MutationObserver(() => {
@@ -397,7 +400,6 @@
       // 新しいリストタブに切り替わった場合
       if (listName !== currentListName) {
         debugOut(`✅ リストタブの切り替えを検出: ${currentListName || 'なし'} -> ${listName}`);
-        currentListName = listName;
         initializeForList(listName);
       }
     } else {
