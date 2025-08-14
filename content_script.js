@@ -298,6 +298,11 @@
   }
 
   function getCurrentListNameFromDOM() {
+    if (!window.location.pathname.startsWith('/home')) {
+      debugOut("ℹ️ ホームではありません");
+      return null;
+    }
+
     if (!navigationNode || !navigationNode.isConnected) {
       navigationNode = document.querySelector(SELECTORS.navigation);
       if (!navigationNode) {
