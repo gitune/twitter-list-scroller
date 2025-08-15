@@ -28,6 +28,7 @@
   let timelineMutationTimeout = null;
   let saveTweetTimeout = null;
   let isScrollingToSaved = false;
+  let isInitializing = false;
   let debugMode = false;
 
   function debugOut(msg) {
@@ -238,7 +239,7 @@
       await scrollToTime(savedTweet);
 
       // 2. IntersectionObserverをセットアップ(observeはまだしない)
-      const options = { root: null, rootMargin: '0px', threshold: 0.2 };
+      const options = { root: null, rootMargin: '0px', threshold: 0.4 };
       intersectionObserver = new IntersectionObserver(intersectionCallback, options);
       debugOut("✅ IntersectionObserverをセットアップしました");
 
@@ -402,9 +403,11 @@
 
     if (listName) {
       // 新しいリストタブに切り替わった場合
-      if (listName !== currentListName) {
+      if (listName !== currentListName && !isInitializing) {
+        isInitializing = true;
         debugOut(`✅ リストタブの切り替えを検出: ${currentListName || 'なし'} -> ${listName}`);
         initializeForList(listName);
+        isInitializing = false;
       }
     } else {
       // リスト以外のページに移動した場合
