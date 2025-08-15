@@ -169,8 +169,8 @@
 
     let topMostValidEntry = null;
     for (const entry of sortedEntries) {
-      // プロモーション以外が保存対象
-      if (!isPromotedTweet(entry.target)) {
+      // プロモーション、親ツイート以外が保存対象
+      if (!isPromotedTweet(entry.target) && !isParentTweet(entry.target)) {
         topMostValidEntry = entry;
         break; // 最初の有効なツイートを見つけたらループを抜ける
       }
@@ -184,8 +184,8 @@
       const listName = currentListName; // debounceに備える
       const tweetId = getTweetId(topMostValidEntry.target);
       let tweetTime = null;
-      // Retweetではなく、親tweetでもない場合にのみ時刻を記録
-      if (!isRetweet(topMostValidEntry.target) && !isParentTweet(topMostValidEntry.target)) {
+      // Retweetでない場合にのみ時刻を記録
+      if (!isRetweet(topMostValidEntry.target)) {
         tweetTime = getTweetTimestamp(topMostValidEntry.target);
       }
       if (listName && tweetId) {
