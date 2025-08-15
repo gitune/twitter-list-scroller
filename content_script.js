@@ -47,14 +47,14 @@
       return;
     }
     const key = `list-name-${listName}-time`;
-    const result = await browser.storage.local.get(key);
+    const result = await browser.storage.sync.get(key);
     const savedTweetIdAndTime = result[key];
     if (!savedTweetIdAndTime) {
       if (!tweetTime) {
         debugOut("❗ 初回はtweetTimeが必須なため保存をスキップ");
         return;
       }
-      await browser.storage.local.set({ [key]: `${tweetTime},${tweetId}` });
+      await browser.storage.sync.set({ [key]: `${tweetTime},${tweetId}` });
       debugOut(`✅ 初回保存完了: リスト名「${listName}」の既読時刻「${tweetTime}」、ID「${tweetId}」を保存しました`);
     } else {
       const splitted = savedTweetIdAndTime.split(',');
@@ -70,7 +70,7 @@
       //  - 新しい時刻(tweetTime)があればそれを使い、なければ古い時刻(savedTweetTime)を維持する
       const timeToSave = tweetTime || savedTweetTime;
       // 3. 保存を実行する
-      await browser.storage.local.set({ [key]: `${timeToSave},${tweetId}` });
+      await browser.storage.sync.set({ [key]: `${timeToSave},${tweetId}` });
       // 4. 保存内容に応じたログを出力する
       if (tweetTime) {
         debugOut(`✅ 保存完了: リスト名「${listName}」の既読時刻「${tweetTime}」、ID「${tweetId}」を保存しました`);
@@ -83,7 +83,7 @@
   async function getSavedTweetIdAndTime(listName) {
     debugOut(`🔵 取得処理開始: listName=${listName}`);
     const key = `list-name-${listName}-time`;
-    const result = await browser.storage.local.get(key);
+    const result = await browser.storage.sync.get(key);
     const savedTweetIdAndTime = result[key];
     if (savedTweetIdAndTime) {
       const splitted = savedTweetIdAndTime.split(',');
