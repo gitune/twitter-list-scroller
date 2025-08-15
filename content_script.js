@@ -11,6 +11,7 @@
     timeline: 'div[aria-label^="タイムライン:"]',
     tweetArticle: "article[data-testid='tweet']",
     navigation: 'main[role="main"] nav[role="navigation"]',
+    navigationMobile: 'div[data-testid="TopNavBar"] nav[role="navigation"]',
     activeTab: 'a[role="tab"][aria-selected="true"] span',
     userAvatar: "div[data-testid='Tweet-User-Avatar']",
     anchor: 'a[href*="/status/"]',
@@ -312,7 +313,7 @@
       
       if (foundArticle) {
         debugOut('✅ 目的の地点に到達しました。画面内までスクロールします');
-        const targetPosition = foundArticle.getBoundingClientRect().top + window.scrollY - 100;
+        const targetPosition = foundArticle.getBoundingClientRect().top + window.scrollY - 150;
         window.scrollTo({ top: targetPosition, behavior: 'smooth' });
         foundArticle.style.border = "2px solid #1DA1F2";
         setTimeout(() => { foundArticle.style.border = "none"; }, 1500);
@@ -368,8 +369,11 @@
     if (!navigationNode || !navigationNode.isConnected) {
       navigationNode = document.querySelector(SELECTORS.navigation);
       if (!navigationNode) {
-        debugOut("ℹ️ ナビゲーションタブが見つかりません");
-        return null;
+        navigationNode = document.querySelector(SELECTORS.navigationMobile);
+        if (!navigationNode) {
+          debugOut("ℹ️ ナビゲーションタブが見つかりません");
+          return null;
+        }
       }
     }
 
