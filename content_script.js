@@ -29,6 +29,7 @@
   let saveTweetTimeout = null;
   let isScrollingToSaved = false;
   let isInitializing = false;
+
   let debugMode = false;
 
   function debugOut(msg) {
@@ -316,8 +317,8 @@
         debugOut('✅ 目的の地点に到達しました。画面内までスクロールします');
         const targetPosition = foundArticle.getBoundingClientRect().top + window.scrollY - 150;
         window.scrollTo({ top: targetPosition, behavior: 'smooth' });
-        foundArticle.style.border = "2px solid #1DA1F2";
-        setTimeout(() => { foundArticle.style.border = "none"; }, 1500);
+        foundArticle.style.boxShadow = "inset 0 0 10px 5px white";
+        setTimeout(() => { foundArticle.style.boxShadow = "none"; }, 1500);
         found = true;
       } else {
         debugOut(`🔄 見つかりません。下へスクロールしてさらに読み込みます... (試行回数: ${retries + 1}/${maxRetries})`);
@@ -397,7 +398,7 @@
   /**
    * 全体の監視役。主にタブの切り替えを検知する
    */
-  function runCheck() {
+  async function runCheck() {
     debugOut(`🔄 runCheck実行...`);
     const listName = getCurrentListNameFromDOM();
 
@@ -406,8 +407,18 @@
       if (listName !== currentListName && !isInitializing) {
         isInitializing = true;
         debugOut(`✅ リストタブの切り替えを検出: ${currentListName || 'なし'} -> ${listName}`);
-        initializeForList(listName);
-        isInitializing = false;
+        // 一旦監視を止める
+        mainObserver.disconnect();
+        // 既読点復帰
+        try {
+          await initializeForList(listName);
+        } finally {
+          isInitializing = false;
+        }
+        // mainNodeの監視を再開
+        const mainNode = document.querySelector(SELECTORS.main) || document.body;
+        mainObserver.observe(mainNode, { childList: true, subtree: true });
+        debugOut(`DOM変更監視を再開しました。対象: ${mainNode.tagName}`);
       }
     } else {
       // リスト以外のページに移動した場合
