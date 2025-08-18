@@ -1,17 +1,28 @@
 {
   "manifest_version": 3,
   "name": "X/Twitter List Tab Navigator",
-  "version": "1.0.19",
+  "version": "1.0.21",
   "description": "X/Twitterのリストをタブで表示しているとき、最後に閲覧した位置まで自動的にスクロールします。",
 
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "X/Twitter List Tab Navigator"
+  },
+
   "permissions": [
-    "storage"
+    "storage",
+    "tabs"
   ],
 
   "host_permissions": [
     "*://twitter.com/*",
     "*://x.com/*"
   ],
+
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
 
   "content_scripts": [
     {
