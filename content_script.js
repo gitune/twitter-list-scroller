@@ -291,13 +291,13 @@
       
       for (let i = 0; i < articles.length; i++) {
         const article = articles[i];
-        if (!isPromotedTweet(article)) {
+        if (!isPromotedTweet(article) && !isParentTweet(article)) {
           const articleId = getTweetId(article);
           if (articleId === targetTweet.id) {
             foundArticle = article;
             break;
           }
-          if (!isRetweet(article) && !isParentTweet(article)) {
+          if (!isRetweet(article)) {
             const articleTime = getTweetTimestamp(article);
             if (articleTime) {
               const articleDate = new Date(articleTime);
