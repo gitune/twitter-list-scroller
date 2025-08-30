@@ -217,9 +217,24 @@
    * 特定のリストタブが表示された時に、各種監視を開始する初期化関数
    * @param {string} listName 
    */
-  async function initializeForList(listName) {
+  async function initializeForList(listName, targetNode) {
     debugOut(`🚀 リスト「${listName}」の初期化処理を開始します`);
     
+    try {
+      await waitForTimelineToLoad(targetNode);
+
+      // 保存位置までスクロール
+      const savedTweet = await getSavedTweetIdAndTime(listName);
+      await scrollToTime(savedTweet, targetNode);
+
+      // currentListName更新
+      currentListName = listName;
+    } catch (error) {
+      console.error(`[ListNav] ❗ リスト初期化処理でエラー: ${error.message}`);
+    }
+  }
+
+  function stopObservers() {
     // 既存のObserverを破棄し、新しいインスタンスを作成する
     if (timelineObserver) {
       timelineObserver.disconnect();
@@ -229,44 +244,31 @@
       intersectionObserver.disconnect();
       intersectionObserver = null;
     }
+  }
 
-    const targetNode = document.querySelector(SELECTORS.main) || document.body;
+  function startObservers(targetNode) {
+    // IntersectionObserverをセットアップ(observeはまだしない)
+    const options = { root: null, rootMargin: '0px', threshold: 0.4 };
+    intersectionObserver = new IntersectionObserver(intersectionCallback, options);
+    debugOut("✅ IntersectionObserverをセットアップしました");
 
-    try {
-      await waitForTimelineToLoad(targetNode);
-
-      // 1. 保存位置までスクロール
-      const savedTweet = await getSavedTweetIdAndTime(listName);
-      await scrollToTime(savedTweet);
-
-      // 2. IntersectionObserverをセットアップ(observeはまだしない)
-      const options = { root: null, rootMargin: '0px', threshold: 0.4 };
-      intersectionObserver = new IntersectionObserver(intersectionCallback, options);
-      debugOut("✅ IntersectionObserverをセットアップしました");
-
-      // 3. currentListName更新
-      currentListName = listName;
-
-      // 4. タイムラインのDOM変更監視をセットアップ(intersection observeも開始)
-      timelineNode = targetNode.querySelector(SELECTORS.timeline);
-      if (timelineNode) {
-        timelineObserver = new MutationObserver(() => {
-          // debounce
-          clearTimeout(timelineMutationTimeout);
-          timelineMutationTimeout = setTimeout(handleTimelineMutations, 300);
-        });
-        timelineObserver.observe(timelineNode, { childList: true, subtree: true });
-        debugOut("✅ タイムラインのDOM変更監視を開始しました");
-      }
-    } catch (error) {
-      console.error(`[ListNav] ❗ リスト初期化処理でエラー: ${error.message}`);
+    // タイムラインのDOM変更監視をセットアップ(intersection observeも開始)
+    timelineNode = targetNode.querySelector(SELECTORS.timeline);
+    if (timelineNode) {
+      timelineObserver = new MutationObserver(() => {
+        // debounce
+        clearTimeout(timelineMutationTimeout);
+        timelineMutationTimeout = setTimeout(handleTimelineMutations, 300);
+      });
+      timelineObserver.observe(timelineNode, { childList: true, subtree: true });
+      debugOut("✅ タイムラインのDOM変更監視を開始しました");
     }
   }
 
   /**
    * 目的のツイートまでスクロール
    */
-  async function scrollToTime(targetTweet) {
+  async function scrollToTime(targetTweet, targetNode) {
     if (!targetTweet) {
       debugOut('ℹ️ 保存された時刻が見つからないため、スクロールをスキップします');
       return;
@@ -279,11 +281,10 @@
 
     let found = false;
     let retries = 0;
-    const maxRetries = 100;
-    const retryInterval = 500;
+    const maxRetries = 200;
+    const retryInterval = 300;
     
     const targetDate = new Date(targetTweet.time);
-    const targetNode = document.querySelector(SELECTORS.main) || document.body;
 
     while (!found && retries < maxRetries) {
       const articles = targetNode.querySelectorAll(SELECTORS.tweetArticle);
@@ -403,15 +404,17 @@
     const listName = getCurrentListNameFromDOM();
 
     if (listName) {
+      const targetNode = document.querySelector(SELECTORS.main) || document.body;
       // 新しいリストタブに切り替わった場合
       if (listName !== currentListName && !isInitializing) {
         isInitializing = true;
         debugOut(`✅ リストタブの切り替えを検出: ${currentListName || 'なし'} -> ${listName}`);
         // 一旦監視を止める
+        stopObservers();
         mainObserver.disconnect();
         // 既読点復帰
         try {
-          await initializeForList(listName);
+          await initializeForList(listName, targetNode);
         } finally {
           isInitializing = false;
         }
@@ -420,20 +423,14 @@
         mainObserver.observe(mainNode, { childList: true, subtree: true });
         debugOut(`DOM変更監視を再開しました。対象: ${mainNode.tagName}`);
       }
+      // observerが停止していたら再開
+      if (!timelineObserver) {
+        startObservers(targetNode);
+      }
     } else {
       // リスト以外のページに移動した場合
-      if (currentListName) {
-        debugOut(`ℹ️ リスト表示が終了したため、各種監視を停止します`);
-        currentListName = null;
-        if (intersectionObserver) {
-          intersectionObserver.disconnect();
-          intersectionObserver = null;
-        }
-        if (timelineObserver) {
-          timelineObserver.disconnect();
-          timelineObserver = null;
-        }
-      }
+      debugOut(`ℹ️ リスト表示が終了したため、各種監視を停止します`);
+      stopObservers();
     }
   }
 
