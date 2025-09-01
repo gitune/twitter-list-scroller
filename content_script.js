@@ -18,6 +18,8 @@
     timestamp: 'a[href*="/status/"] > time',
     retweet: 'a[role="link"] > span'
   };
+  // 除外するタブ名
+  const EXCLUDED_TABS = [ "おすすめ" ];
 
   let navigationNode = null;
   let timelineNode = null;
@@ -387,6 +389,10 @@
     }
     
     const tabName = activeTabSpan.textContent;
+    if (EXCLUDED_TABS.includes(tabName)) {
+      debugOut(`ℹ️ 除外対象タブです: ${tabName}`);
+      return null;
+    }
     if (tabName) {
       debugOut(`✅ アクティブなタブ名を特定: ${tabName}`);
       return tabName;
