@@ -12,7 +12,7 @@
     tweetArticle: "article[data-testid='tweet']",
     navigation: 'main[role="main"] nav[role="navigation"]',
     navigationMobile: 'div[data-testid="TopNavBar"] nav[role="navigation"]',
-    activeTab: 'a[role="tab"][aria-selected="true"] span',
+    activeTab: 'div[role="tab"][aria-selected="true"] span',
     userAvatar: "div[data-testid='Tweet-User-Avatar']",
     anchor: 'a[href*="/status/"]',
     timestamp: 'a[href*="/status/"] > time',
@@ -32,7 +32,10 @@
   let isScrollingToSaved = false;
   let isInitializing = false;
 
-  let debugMode = false;
+  // スクロール中断制御用
+  let scrollAbortController = null;
+
+  let debugMode = true;
 
   function debugOut(msg) {
     if (debugMode) {
@@ -46,7 +49,6 @@
 
   async function saveLastTweetIdAndTime(listName, tweetId, tweetTime) {
     debugOut(`🔴 保存処理開始: listName=${listName}, tweetId=${tweetId}, tweetTime=${tweetTime}`);
-    // tweetTimeはnull許容(初回を除く)
     if (!listName || !tweetId) {
       debugOut("❗ listNameまたはtweetIdが不正なため保存をスキップ");
       return;
@@ -55,6 +57,7 @@
     const result = await browser.storage.sync.get(key);
     const savedTweetIdAndTime = result[key];
     if (!savedTweetIdAndTime) {
+      // まだ保存されていない場合
       if (!tweetTime) {
         debugOut("❗ 初回はtweetTimeが必須なため保存をスキップ");
         return;
@@ -62,21 +65,18 @@
       await browser.storage.sync.set({ [key]: `${tweetTime},${tweetId}` });
       debugOut(`✅ 初回保存完了: リスト名「${listName}」の既読時刻「${tweetTime}」、ID「${tweetId}」を保存しました`);
     } else {
+      // 既に保存されている場合
       const splitted = savedTweetIdAndTime.split(',');
       const savedTweetTime = splitted.shift();
       const savedTweetId = splitted.shift();
-      // 1. 保存が不要なケースを最初に弾く (ガード節)
-      //  - 新しい時刻があり、かつ時刻もIDも前回と全く同じ場合は何もしない
+      // 内容が同じならスキップ
       if (tweetTime && savedTweetTime === tweetTime && savedTweetId === tweetId) {
         debugOut("✅ 前回と同じリスト、時刻のため保存をスキップ");
         return;
       }
-      // 2. 保存する値を決定する
-      //  - 新しい時刻(tweetTime)があればそれを使い、なければ古い時刻(savedTweetTime)を維持する
+      // 時刻が取れない（リポストなど）場合は、既存の時刻を維持してIDだけ更新する
       const timeToSave = tweetTime || savedTweetTime;
-      // 3. 保存を実行する
       await browser.storage.sync.set({ [key]: `${timeToSave},${tweetId}` });
-      // 4. 保存内容に応じたログを出力する
       if (tweetTime) {
         debugOut(`✅ 保存完了: リスト名「${listName}」の既読時刻「${tweetTime}」、ID「${tweetId}」を保存しました`);
       } else {
@@ -108,12 +108,10 @@
   // --- ユーティリティ関数 ---
   
   function isPromotedTweet(article) {
-    const s = article.querySelectorAll("span");
-    if (s.length > 0) {
-      if (s[s.length - 1].textContent.endsWith("プロモーション")) {
-        debugOut("isPromotedTweet: " + s[s.length - 1].textContent + " = true");
-        return true;
-      }
+    const s = Array.from(article.querySelectorAll("span")).find(span => span.textContent.trim() === '広告');
+    if (s != null) {
+      debugOut("isPromotedTweet: " + s.textContent + " = true");
+      return true;
     }
     return false;
   }
@@ -129,10 +127,13 @@
   }
 
   function isParentTweet(article) {
-    const c = article.querySelector(SELECTORS.userAvatar).parentNode.childElementCount;
-    if (c > 1) {
-      debugOut("isParentTweet: true");
-      return true;
+    const avatar = article.querySelector(SELECTORS.userAvatar);
+    if (avatar && avatar.parentNode) {
+      const c = avatar.parentNode.childElementCount;
+      if (c > 1) {
+        debugOut("isParentTweet: true");
+        return true;
+      }
     }
     return false;
   }
@@ -157,9 +158,24 @@
     return null;
   }
 
-  /**
-   * IntersectionObserverのコールバック。画面に見えているツイートを検知して保存
-   */
+  // 手動操作による中断を検知するリスナー
+  function setupManualScrollAbort() {
+    const abortOnUserAction = () => {
+      if (scrollAbortController) {
+        debugOut("✋ ユーザー操作（スクロール/キー入力）を検知したため、自動スクロールを中断します");
+        scrollAbortController.abort();
+      }
+      // 一度検知したらイベントリスナーを削除
+      window.removeEventListener('wheel', abortOnUserAction);
+      window.removeEventListener('touchmove', abortOnUserAction);
+      window.removeEventListener('keydown', abortOnUserAction);
+    };
+
+    window.addEventListener('wheel', abortOnUserAction, { passive: true });
+    window.addEventListener('touchmove', abortOnUserAction, { passive: true });
+    window.addEventListener('keydown', abortOnUserAction, { passive: true });
+  }
+
   function intersectionCallback(entries) {
     debugOut('intersectionの変化を検知');
     if (isScrollingToSaved) {
@@ -167,69 +183,64 @@
       return;
     }
     
-    // 見えているentriesをtopの位置でソートしてから処理する
-    const sortedEntries = entries.filter(entry => entry.isIntersecting)
+    // 画面内にあり、かつ一定以上の割合が表示されているツイートを抽出
+    const sortedEntries = entries
+      .filter(entry => entry.isIntersecting && entry.intersectionRatio >= 0.8)
       .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
 
+    // 有効な（広告やリプライ親でない）ツイートのうち、最も上にあるものを探す
     let topMostValidEntry = null;
     for (const entry of sortedEntries) {
-      // プロモーション、親ツイート以外が保存対象
       if (!isPromotedTweet(entry.target) && !isParentTweet(entry.target)) {
         topMostValidEntry = entry;
-        break; // 最初の有効なツイートを見つけたらループを抜ける
+        break;
       }
     }
     
     if (topMostValidEntry) {
+      // 念のため、現在のタブ名と一致するか確認
       if (currentListName !== getCurrentListNameFromDOM()) {
         debugOut("➡️ タブ切り替え中のため保存処理をスキップ");
         return;
       }
-      const listName = currentListName; // debounceに備える
+      const listName = currentListName;
       const tweetId = getTweetId(topMostValidEntry.target);
       let tweetTime = null;
-      // Retweetでない場合にのみ時刻を記録
+      // リポストの場合は時刻を更新しない（取得しない）
       if (!isRetweet(topMostValidEntry.target)) {
         tweetTime = getTweetTimestamp(topMostValidEntry.target);
       }
       if (listName && tweetId) {
         debugOut(`👀 画面上部に表示されている最も新しい有効なツイートのIDと時刻: ${tweetId},${tweetTime}`);
+        // 短時間に何度も保存しないようdebounce
         clearTimeout(saveTweetTimeout);
         saveTweetTimeout = setTimeout(() => {
           saveLastTweetIdAndTime(listName, tweetId, tweetTime);
-        }, 500); // 頻繁な保存を防ぐためのdebounce
+        }, 500);
       }
     }
   }
 
-  /**
-   * タイムラインに新しいツイートが読み込まれた際の処理
-   */
   function handleTimelineMutations() {
     debugOut("タイムラインのDOM変更を検知");
     if (timelineNode && timelineNode.isConnected && intersectionObserver) {
-      // intersectionObserverをreset
+      // タイムラインの内容が変わったら監視対象を更新する
       intersectionObserver.disconnect();
       timelineNode.querySelectorAll(SELECTORS.tweetArticle)
         .forEach(article => intersectionObserver.observe(article));
     }
   }
 
-  /**
-   * 特定のリストタブが表示された時に、各種監視を開始する初期化関数
-   * @param {string} listName 
-   */
   async function initializeForList(listName, targetNode) {
     debugOut(`🚀 リスト「${listName}」の初期化処理を開始します`);
-    
     try {
+      // タイムラインの読み込みを待つ
       await waitForTimelineToLoad(targetNode);
-
-      // 保存位置までスクロール
+      // 保存された情報を取得
       const savedTweet = await getSavedTweetIdAndTime(listName);
+      // スクロール実行
       await scrollToTime(savedTweet, targetNode);
-
-      // currentListName更新
+      // 初期化が終わったリスト名を保持
       currentListName = listName;
     } catch (error) {
       console.error(`[ListNav] ❗ リスト初期化処理でエラー: ${error.message}`);
@@ -237,7 +248,12 @@
   }
 
   function stopObservers() {
-    // 既存のObserverを破棄し、新しいインスタンスを作成する
+    // スクロール処理を中断
+    if (scrollAbortController) {
+      debugOut("ℹ️ オブザーバー停止に伴いスクロール処理を中断します");
+      scrollAbortController.abort();
+      scrollAbortController = null;
+    }
     if (timelineObserver) {
       timelineObserver.disconnect();
       timelineObserver = null;
@@ -249,16 +265,14 @@
   }
 
   function startObservers(targetNode) {
-    // IntersectionObserverをセットアップ(observeはまだしない)
-    const options = { root: null, rootMargin: '0px', threshold: 0.4 };
+    const options = { root: null, rootMargin: '0px', threshold: 0.8 };
     intersectionObserver = new IntersectionObserver(intersectionCallback, options);
-    debugOut("✅ IntersectionObserverをセットアップしました");
+    debugOut("✅ IntersectionObserverをセットアップしました (閾値:0.8)");
 
-    // タイムラインのDOM変更監視をセットアップ(intersection observeも開始)
     timelineNode = targetNode.querySelector(SELECTORS.timeline);
     if (timelineNode) {
       timelineObserver = new MutationObserver(() => {
-        // debounce
+        // 頻繁な発生を抑えるためdebounce
         clearTimeout(timelineMutationTimeout);
         timelineMutationTimeout = setTimeout(handleTimelineMutations, 300);
       });
@@ -268,7 +282,7 @@
   }
 
   /**
-   * 目的のツイートまでスクロール
+   * 目的のツイートまでスクロール（無限ループ・中断対応版）
    */
   async function scrollToTime(targetTweet, targetNode) {
     if (!targetTweet) {
@@ -276,75 +290,103 @@
       return;
     }
 
+    // 進行中のスクロールがあれば中断
+    if (scrollAbortController) {
+      scrollAbortController.abort();
+    }
+    scrollAbortController = new AbortController();
+    const signal = scrollAbortController.signal;
+
+    // 手動操作監視の開始
+    setupManualScrollAbort();
+
     debugOut(`⬇️ スクロール処理開始: 目的のID=${targetTweet.id}、時刻=${targetTweet.time}`);
     
     isScrollingToSaved = true;
     debugOut(`🔍 目的のID「${targetTweet.id}」、および時刻「${targetTweet.time}」を検索中...`);
 
     let found = false;
-    let retries = 0;
-    const maxRetries = 200;
-    const retryInterval = 300;
-    
+    let retries = 0; // ログ用（リミットとしては使用しない）
+    const retryInterval = 250;
     const targetDate = new Date(targetTweet.time);
 
-    while (!found && retries < maxRetries) {
-      const articles = targetNode.querySelectorAll(SELECTORS.tweetArticle);
-      let foundArticle = null;
-      
-      for (let i = 0; i < articles.length; i++) {
-        const article = articles[i];
-        if (!isPromotedTweet(article) && !isParentTweet(article)) {
-          const articleId = getTweetId(article);
-          if (articleId === targetTweet.id) {
-            foundArticle = article;
-            break;
-          }
-          if (!isRetweet(article)) {
-            const articleTime = getTweetTimestamp(article);
-            if (articleTime) {
-              const articleDate = new Date(articleTime);
-              if (articleDate.getTime() === targetDate.getTime()) {
-                foundArticle = article;
-                break;
-              } else if (articleDate.getTime() < targetDate.getTime()) {
-                foundArticle = articles[i > 0 ? i - 1 : 0];
-                break;
+    try {
+      while (!found) {
+        // 中断信号のチェック
+        if (signal.aborted) {
+          debugOut('🛑 スクロール処理が外部またはユーザー操作により中断されました');
+          return;
+        }
+
+        const articles = targetNode.querySelectorAll(SELECTORS.tweetArticle);
+        let foundArticle = null;
+
+        for (let i = 0; i < articles.length; i++) {
+          const article = articles[i];
+          if (!isPromotedTweet(article) && !isParentTweet(article)) {
+            const articleId = getTweetId(article);
+            if (articleId === targetTweet.id) {
+              foundArticle = article;
+              break;
+            }
+            if (!isRetweet(article)) {
+              const articleTime = getTweetTimestamp(article);
+              if (articleTime) {
+                const articleDate = new Date(articleTime);
+                if (articleDate.getTime() === targetDate.getTime()) {
+                  // 保存時刻にピッタリ一致した場合
+                  foundArticle = article;
+                  break;
+                } else if (articleDate.getTime() < targetDate.getTime()) {
+                  // 保存時刻を追い越した場合（目的のツイートが消されている可能性など）
+                  // 一つ前の記事を目的地とする
+                  foundArticle = articles[i > 0 ? i - 1 : 0];
+                  break;
+                }
               }
             }
           }
         }
-      }
-      
-      if (foundArticle) {
-        debugOut('✅ 目的の地点に到達しました。画面内までスクロールします');
-        const targetPosition = foundArticle.getBoundingClientRect().top + window.scrollY - 150;
-        window.scrollTo({ top: targetPosition, behavior: 'smooth' });
-        foundArticle.style.boxShadow = "inset 0 0 10px 5px white";
-        setTimeout(() => { foundArticle.style.boxShadow = "none"; }, 1500);
-        found = true;
-      } else {
-        debugOut(`🔄 見つかりません。下へスクロールしてさらに読み込みます... (試行回数: ${retries + 1}/${maxRetries})`);
-        articles[articles.length - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
-        retries++;
-        await new Promise(resolve => setTimeout(resolve, retryInterval));
-      }
-    }
 
-    if (!found) {
-      debugOut('⚠️ 指定された時刻のツイートが見つかりませんでした');
+        if (foundArticle) {
+          debugOut('✅ 目的の地点に到達しました。画面内までスクロールします');
+          const targetPosition = foundArticle.getBoundingClientRect().top + window.scrollY - 150;
+          window.scrollTo({ top: targetPosition, behavior: 'smooth' });
+          // 対象を一時的に強調表示
+          foundArticle.classList.add('list-nav-highlight');
+          setTimeout(() => {
+              foundArticle.classList.remove('list-nav-highlight');
+          }, 1500);
+          found = true;
+        } else {
+          // 見つからない場合は下部を読み込ませるために少しスクロールして待つ
+          debugOut(`🔄 見つかりません。下へスクロールしてさらに読み込みます... (試行回数: ${retries + 1})`);
+          if (articles.length > 0) {
+            articles[articles.length - 1].scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          retries++;
+          await new Promise(resolve => setTimeout(resolve, retryInterval));
+        }
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        debugOut('ℹ️ スクロール処理が正常に中断されました');
+      } else {
+        console.error(`[ListNav] ❗ スクロールエラー: ${err.message}`);
+      }
+    } finally {
+      isScrollingToSaved = false;
+      if (scrollAbortController?.signal === signal) {
+        scrollAbortController = null;
+      }
     }
-    
-    isScrollingToSaved = false;
   }
 
-  // --- 初期化とDOM監視 ---
-  
   function waitForTimelineToLoad(baseNode) {
     debugOut(`⬇️ タイムラインの読み込み待ち……`);
     return new Promise((resolve, reject) => {
       let checkAttempts = 0;
-      const maxAttempts = 30;
+      const maxAttempts = 30; // 15秒程度待つ
       const interval = 500;
       
       const check = () => {
@@ -372,13 +414,10 @@
     }
 
     if (!navigationNode || !navigationNode.isConnected) {
-      navigationNode = document.querySelector(SELECTORS.navigation);
+      navigationNode = document.querySelector(SELECTORS.navigation) || document.querySelector(SELECTORS.navigationMobile);
       if (!navigationNode) {
-        navigationNode = document.querySelector(SELECTORS.navigationMobile);
-        if (!navigationNode) {
-          debugOut("ℹ️ ナビゲーションタブが見つかりません");
-          return null;
-        }
+        debugOut("ℹ️ ナビゲーションタブが見つかりません");
+        return null;
       }
     }
 
@@ -389,6 +428,7 @@
     }
     
     const tabName = activeTabSpan.textContent;
+    // 除外対象のタブなら無視
     if (EXCLUDED_TABS.includes(tabName)) {
       debugOut(`ℹ️ 除外対象タブです: ${tabName}`);
       return null;
@@ -402,9 +442,6 @@
     return null;
   }
 
-  /**
-   * 全体の監視役。主にタブの切り替えを検知する
-   */
   async function runCheck() {
     debugOut(`🔄 runCheck実行...`);
     const listName = getCurrentListNameFromDOM();
@@ -452,8 +489,6 @@
     const mainNode = document.querySelector(SELECTORS.main) || document.body;
     mainObserver.observe(mainNode, { childList: true, subtree: true });
     debugOut(`DOM変更監視を開始しました。対象: ${mainNode.tagName}`);
-    
-    // 初回実行
     runCheck();
   }, 1500);
 

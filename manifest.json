@@ -1,29 +1,24 @@
 {
   "manifest_version": 3,
   "name": "X/Twitter List Tab Navigator",
-  "version": "1.0.25",
+  "version": "1.0.29",
   "description": "X/Twitterのリストをタブで表示しているとき、最後に閲覧した位置まで自動的にスクロールします。",
-
   "action": {
     "default_popup": "popup.html",
     "default_title": "X/Twitter List Tab Navigator"
   },
-
   "permissions": [
     "storage",
     "tabs"
   ],
-
   "host_permissions": [
     "*://twitter.com/*",
     "*://x.com/*"
   ],
-
   "options_ui": {
     "page": "options.html",
     "open_in_tab": true
   },
-
   "content_scripts": [
     {
       "matches": [
@@ -32,13 +27,20 @@
       ],
       "js": [
         "content_script.js"
+      ],
+      "css": [
+        "styles.css"
       ]
     }
   ],
-
   "browser_specific_settings": {
     "gecko": {
-      "id": "list-tab-navigator@digitune.org"
+      "id": "list-tab-navigator@digitune.org",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
-  } 
+  }
 }

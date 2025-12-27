@@ -29,4 +29,4 @@ Firefoxの場合、設定中のAdd-on debuggingからローカルにあるadd-on
 
 ## 謝辞
 
-Firefox add-onとしてのひな形や、基本的な処理の骨格作成についてはGemini 2.5 Pro/Flashに手伝ってもらいました。とても助かりました。
+Firefox add-onとしてのひな形や、基本的な処理の骨格作成についてはGemini 2.5 Pro/Flashおよびその後継に手伝ってもらいました。とても助かりました。
